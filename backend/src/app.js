@@ -11,17 +11,44 @@
 // usando multer com diskStorage. Não utilize provedores externos.
 
 const express = require('express');
+const path = require('node:path');
+const createDocumentsRepository = require('./repositories/documents.repository');
+const createDocumentsService = require('./services/documents.service');
+const createDocumentsController = require('./controllers/documents.controller');
+const createDocumentsRouter = require('./routes/documents.routes');
 
-const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
+function createApp({
+  storageDirectory = path.resolve(__dirname, '../storage'),
+  owner = process.env.DEFAULT_OWNER || 'default',
+} = {}) {
+  const app = express();
+  const repository = createDocumentsRepository({ storageDirectory });
+  const service = createDocumentsService({ repository, owner });
+  const controller = createDocumentsController(service);
+  const documentsRouter = createDocumentsRouter({ controller, storageDirectory });
 
-// Endpoint de verificação de saúde. As demais rotas (/upload, /documents,
-// /documents/:id/download) serão implementadas durante o Passo 2.
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
+  app.use(express.json());
+  app.get('/health', (req, res) => {
+    res.json({ status: 'ok' });
+  });
+  app.use(documentsRouter);
+  app.use((error, req, res, next) => {
+    if (res.headersSent) return next(error);
+
+    const isMulterError = error.name === 'MulterError';
+    const statusCode = isMulterError ? 400 : error.statusCode || 500;
+    const code = isMulterError ? 'FILE_REQUIRED' : error.code || 'INTERNAL_ERROR';
+    const message = statusCode >= 500 ? 'Ocorreu um erro interno.' : error.message;
+
+    res.status(statusCode).json({ error: { code, message } });
+  });
+
+  return app;
+}
+
+const app = createApp();
 
 if (require.main === module) {
   app.listen(PORT, () => {
@@ -29,4 +56,5 @@ if (require.main === module) {
   });
 }
 
+app.createApp = createApp;
 module.exports = app;
